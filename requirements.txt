@@ -1,0 +1,5 @@
+packaging==25.0
+pillow==12.0.0
+pytesseract==0.3.13
+RapidFuzz==3.14.3
+thefuzz==0.22.1
