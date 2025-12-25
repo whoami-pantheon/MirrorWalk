@@ -1,6 +1,6 @@
 # MirrorWalk
 
-                    "The reflection holds the memory..."
+                     "The reflection holds the memory..."
 
     A tool for gazing into the digital mirror and finding the words lost in the glass.
 
