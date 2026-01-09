@@ -32,7 +32,7 @@
                       ...an observer in the gallery of pixels,    
     
                              [ M I R R O R W A L K ]
-                            "Your Memories, Indexed."
+                           "Your Artifacts, Indexed."
 
 ## Author
 
