@@ -74,7 +74,7 @@ Organizational memory is often trapped in unindexed visual artifacts: architectu
 | `setup [--yes] [--autostart] [--cache] [--no-index]` | First-run setup on a new computer. `--remove-autostart` undoes the login refresh. |
 | `index PATH... [--flat]` | Index folders (they are remembered for refresh). |
 | `refresh [--quiet] [--retry-errors]` | Re-scan every remembered folder: new, changed, deleted. |
-| `search WORDS... [--limit N] [--all] [--since 7d] [--in PATH] [--hide-deleted] [--json] [--open N]` | Search. Inline filters work too: `search error since:2w in:~/Pictures`. Exit code 1 when nothing matches. |
+| `search WORDS... [--limit N] [--all] [--since 7d] [--in PATH] [--hide-deleted] [--sort MODE] [--json] [--open N]` | Search. Inline filters work too: `search error since:2w in:~/Pictures`. Exit code 1 when nothing matches. |
 | `roots [list\|add\|remove] [PATH]` | Manage remembered folders. |
 | `defaults [--add]` | Show or register the standard picture folders. |
 | `settings [KEY [VALUE]]` | View or change settings. |
@@ -84,7 +84,7 @@ Organizational memory is often trapped in unindexed visual artifacts: architectu
 | `export PATH.csv\|.json` | Export the index. |
 | `import-legacy [results.json]` | Import an index from MirrorWalk 1.x (keeps the file; drops entries from ignored folders). |
 
-In the interactive search: a number opens the image, `v N` opens the full OCR text in your default text viewer, `t N` prints it in the terminal, `f N` opens the image's folder, `c N` copies its path, `n`/`p` page, `e` exports. The text commands also work for deleted files. From the command line: `search ... --open N` (image) or `--open-text N` (full text).
+In the interactive search: a number opens the image, `v N` opens the full OCR text in your default text viewer, `t N` prints it in the terminal, `f N` opens the image's folder, `c N` copies its path, `n`/`p` page, `s` changes the sort order, `e` exports. The text commands also work for deleted files. From the command line: `search ... --open N` (image) or `--open-text N` (full text).
 
 ## Settings
 
@@ -95,6 +95,7 @@ In the interactive search: a number opens the image, `v N` opens the full OCR te
 | `fuzzy` / `fuzzy_threshold` | on / 80 | Typo-tolerant matches below exact ones; 0-100, higher is stricter. |
 | `max_results` | 2000 | Most results a search collects. **0 = unlimited.** |
 | `fuzzy_max` | 200 | Most fuzzy matches added. **0 = unlimited.** |
+| `default_sort` | relevance | Result order: `relevance`, `newest`, `oldest`, `name`, `path`, `largest`, `smallest`. |
 | `page_size` | 20 | Results per page / shown by `search`. **0 = show everything.** |
 | `include_hidden` | off | Walk hidden (dot) folders. |
 | `extra_blocked` | none | Extra folder names to never walk, e.g. `memes,backup`. |

@@ -54,6 +54,17 @@ DEFAULT_SETTINGS = {
     'page_size': 20,                 # results shown per page / by `search` (0 = show everything)
     'max_results': 2000,             # most results a search collects (0 = unlimited)
     'fuzzy_max': 200,                # most fuzzy matches added to a search (0 = unlimited)
+    'default_sort': 'relevance',     # relevance | newest | oldest | name | path | largest | smallest
+}
+
+SORT_MODES = {
+    'relevance': 'best match first (phrase, near, all words, substring, fuzzy)',
+    'newest': 'file date, newest first',
+    'oldest': 'file date, oldest first',
+    'name': 'file name, A to Z',
+    'path': 'folder then name, A to Z',
+    'largest': 'file size, largest first',
+    'smallest': 'file size, smallest first',
 }
 
 # Folders that only ever hold program assets, never user images.
@@ -305,7 +316,12 @@ def coerce_setting(key, value):
             raise MirrorWalkError(f"'{key}' must be a whole number.")
     if isinstance(default, list):
         return [x.strip() for x in str(value).split(',') if x.strip()]
-    return str(value).strip()
+    value = str(value).strip()
+    if key == 'default_sort':
+        value = value.lower()
+        if value not in SORT_MODES:
+            raise MirrorWalkError(f"'default_sort' must be one of: {', '.join(SORT_MODES)}")
+    return value
 
 
 def save_setting(conn, key, value):
@@ -1059,11 +1075,13 @@ def _filters_sql(parsed, hide_deleted, since, in_path):
 
 
 def search(conn, raw, *, fuzzy=None, threshold=None, hide_deleted=False, since=None, in_path=None, cap=None,
-           settings=None):
+           settings=None, sort=None):
     """Ranked results: phrase > near > all words > substring > fuzzy. Returns a list of dicts.
 
-    cap (default: the max_results setting) limits the total; 0 or negative means unlimited."""
+    cap (default: the max_results setting) limits the total; 0 or negative means unlimited.
+    sort (default: the default_sort setting) reorders the collected results; see SORT_MODES."""
     settings = settings or load_settings(conn)
+    sort = sort or settings['default_sort']
     cap = settings["max_results"] if cap is None else cap
     sql_cap = cap if cap and cap > 0 else -1     # SQLite: LIMIT -1 = no limit
     fuzzy = settings['fuzzy'] if fuzzy is None else fuzzy
@@ -1088,7 +1106,7 @@ def search(conn, raw, *, fuzzy=None, threshold=None, hide_deleted=False, since=N
         rows = conn.execute(f"SELECT i.* FROM images i WHERE i.text != ''{where} ORDER BY i.mtime_ns DESC LIMIT ?",
                             fargs + [sql_cap]).fetchall()
         add(rows, 'match')
-        return results
+        return _finish(results, sort, cap, sql_cap)
 
     for tier, expr in (build_tiers(parsed) if (parsed['terms'] or parsed['phrases']) else []):
         rows = conn.execute(
@@ -1118,7 +1136,39 @@ def search(conn, raw, *, fuzzy=None, threshold=None, hide_deleted=False, since=N
             add([by_id[rid]], 'fuzzy', int(score))
 
     results.sort(key=lambda d: (TIER_ORDER[d['tier']], -(d['score'] or 0)))  # stable: bm25 order kept within a tier
-    return results[:cap] if sql_cap > 0 else results
+    return _finish(results, sort, cap, sql_cap)
+
+
+def _finish(results, sort, cap, sql_cap):
+    if sql_cap > 0:
+        results = results[:cap]      # the cap always keeps the best matches, whatever the display order
+    for n, d in enumerate(results):
+        d['rank_pos'] = n
+    return sort_results(results, sort)
+
+
+def resolve_sort(value):
+    """Accept a mode name, a unique prefix, or its 1-based number; returns the mode or None."""
+    v = str(value).strip().lower()
+    modes = list(SORT_MODES)
+    if v.isdigit():
+        return modes[int(v) - 1] if 1 <= int(v) <= len(modes) else None
+    hits = [m for m in modes if m.startswith(v)] if v else []
+    return hits[0] if len(hits) == 1 else (v if v in SORT_MODES else None)
+
+
+def sort_results(results, mode):
+    """Sort in place. Every mode is stable and falls back to relevance order on ties."""
+    key = {
+        'newest': lambda d: -(d.get('mtime_ns') or 0),
+        'oldest': lambda d: d.get('mtime_ns') or 0,
+        'name': lambda d: d['filename'].lower(),
+        'path': lambda d: (os.path.dirname(d['path']).lower(), d['filename'].lower()),
+        'largest': lambda d: -(d.get('size') or 0),
+        'smallest': lambda d: d.get('size') or 0,
+    }.get(mode, lambda d: d['rank_pos'])
+    results.sort(key=lambda d: (key(d), d['rank_pos']))
+    return results
 
 
 def check_alive(conn, results, now=None):
@@ -1447,6 +1497,8 @@ def run_setup(conn, args):
 
 def show_results(conn, results, settings, raw):
     color = use_color()
+    sort = settings['default_sort']
+    sort_results(results, sort)
     page_size = settings['page_size'] if settings['page_size'] > 0 else max(1, len(results))
     page = 0
     pages = (len(results) + page_size - 1) // page_size
@@ -1455,12 +1507,12 @@ def show_results(conn, results, settings, raw):
         shown = check_alive(conn, results[start:start + page_size])
         tiers = Counter(TIER_LABEL[r['tier']] for r in results)
         print(f"\n--- {len(results)} result(s) for: {raw}  [{', '.join(f'{v} {k}' for k, v in tiers.items())}] "
-              f"page {page + 1}/{pages} ---")
+              f"page {page + 1}/{pages}  sorted by {sort} ---")
         for i, r in enumerate(shown, start + 1):
             for line in format_result(i, r, color):
                 print(line)
         print('-' * 30)
-        print('N open image | v N open full text | t N print text | f N folder | c N copy path | n/p page | e export | Enter new search')
+        print('N open image | v N open full text | t N print text | f N folder | c N copy path | n/p page | s change sort | e export | Enter new search')
         choice = ask('>>> ').lower()
         if not choice:
             return
@@ -1469,6 +1521,21 @@ def show_results(conn, results, settings, raw):
             page = min(page + 1, pages - 1)
         elif choice == 'p':
             page = max(page - 1, 0)
+        elif choice == 's' or choice.startswith('s '):
+            wanted = choice[1:].strip()
+            if not wanted:
+                print('\nSort results by:')
+                for n, (name, desc) in enumerate(SORT_MODES.items(), 1):
+                    print(f"  {n}) {name:<9} {desc}{'   <- current' if name == sort else ''}")
+                wanted = ask('Number or name, Enter to keep >>> ')
+            if wanted:
+                mode = resolve_sort(wanted)
+                if mode:
+                    sort = mode
+                    sort_results(results, sort)
+                    page = 0
+                else:
+                    print(f"Unknown sort. Choose: {', '.join(SORT_MODES)}")
         elif choice == 'e':
             with open('search_results.txt', 'w', encoding='utf-8') as ef:
                 ef.write(f'Search results for: {raw}\n' + '=' * 40 + '\n')
@@ -1655,6 +1722,7 @@ def build_parser():
     s.add_argument('--since')
     s.add_argument('--in', dest='in_path')
     s.add_argument('--hide-deleted', action='store_true')
+    s.add_argument('--sort', choices=list(SORT_MODES), help='result order (default: the default_sort setting)')
     s.add_argument('--json', action='store_true')
     s.add_argument('--open', type=int, metavar='N', help='open the image of result number N')
     s.add_argument('--open-text', type=int, metavar='N', help='open the full OCR text of result number N')
@@ -1697,7 +1765,7 @@ def cmd_search(conn, args):
     settings = load_settings(conn)
     raw = ' '.join(args.query)
     results = search(conn, raw, fuzzy=args.fuzzy, threshold=args.threshold, hide_deleted=args.hide_deleted,
-                     since=args.since, in_path=args.in_path, settings=settings)
+                     since=args.since, in_path=args.in_path, settings=settings, sort=args.sort)
     limit = args.limit if args.limit is not None else settings['page_size']
     limit = None if (args.all or limit <= 0) else limit
     shown = check_alive(conn, results[:limit] if limit else results)

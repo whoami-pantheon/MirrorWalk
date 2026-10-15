@@ -169,6 +169,56 @@ class SearchRanking(Base):
         self.assertGreater(self.conn.execute('SELECT COUNT(*) FROM images').fetchone()[0], 0)
 
 
+class Sorting(Base):
+    def setUp(self):
+        super().setUp()
+        self.put('b.png', 'invoice total', mtime_ns=300, size=50, path='/p/z/b.png')
+        self.put('a.png', 'invoice total', mtime_ns=100, size=900, path='/p/z/a.png')
+        self.put('c.png', 'invoice total', mtime_ns=200, size=5, path='/p/y/c.png')
+        self.put('best.png', 'the invoice', mtime_ns=50, size=1, path='/p/x/best.png')
+        self.put('phrase.png', 'invoice total due', mtime_ns=10, size=2, path='/p/x/phrase.png')
+
+    def names(self, **kw):
+        return [r['filename'] for r in self.search('"invoice total"', fuzzy=False, **kw)]
+
+    def test_every_mode_orders_as_described(self):
+        self.assertEqual(self.names(sort='newest'), ['b.png', 'c.png', 'a.png', 'phrase.png'])
+        self.assertEqual(self.names(sort='oldest'), ['phrase.png', 'a.png', 'c.png', 'b.png'])
+        self.assertEqual(self.names(sort='name'), ['a.png', 'b.png', 'c.png', 'phrase.png'])
+        self.assertEqual(self.names(sort='path'), ['phrase.png', 'c.png', 'a.png', 'b.png'])
+        self.assertEqual(self.names(sort='largest'), ['a.png', 'b.png', 'c.png', 'phrase.png'])
+        self.assertEqual(self.names(sort='smallest'), ['phrase.png', 'c.png', 'b.png', 'a.png'])
+
+    def test_relevance_is_default_and_setting_changes_it(self):
+        base = self.names()
+        self.assertEqual(base, self.names(sort='relevance'))
+        self.settings['default_sort'] = 'newest'
+        self.assertEqual(self.names()[0], 'b.png')
+
+    def test_cap_keeps_best_matches_then_sorts(self):
+        got = [r['filename'] for r in self.search('invoice', fuzzy=False, cap=2, sort='oldest')]
+        self.assertEqual(len(got), 2)
+        by_rel = [r['filename'] for r in self.search('invoice', fuzzy=False, cap=2)]
+        self.assertEqual(sorted(got), sorted(by_rel))
+
+    def test_resort_in_place_and_back_to_relevance(self):
+        rs = self.search('"invoice total"', fuzzy=False)
+        rel = [r['filename'] for r in rs]
+        m.sort_results(rs, 'name')
+        self.assertEqual([r['filename'] for r in rs], sorted(rel))
+        m.sort_results(rs, 'relevance')
+        self.assertEqual([r['filename'] for r in rs], rel)
+
+    def test_resolve_sort_and_setting_validation(self):
+        self.assertEqual(m.resolve_sort('2'), 'newest')
+        self.assertEqual(m.resolve_sort('lar'), 'largest')
+        self.assertIsNone(m.resolve_sort('bogus'))
+        self.assertIsNone(m.resolve_sort('n'))     # ambiguous: newest or name
+        self.assertEqual(m.coerce_setting('default_sort', 'NAME'), 'name')
+        with self.assertRaises(m.MirrorWalkError):
+            m.coerce_setting('default_sort', 'sideways')
+
+
 class Indexing(Base):
     def test_new_files_are_read_and_second_run_reads_nothing(self):
         self.img('a.png', text='alpha invoice')
