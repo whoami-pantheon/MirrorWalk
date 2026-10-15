@@ -1,0 +1,14 @@
+# Generated OCR index (contains paths and text from personal images)
+results.json
+results.csv
+search_results.txt
+*.db
+*.db-wal
+*.db-shm
+errors.log
+refresh.lock
+
+# Python
+venv/
+__pycache__/
+*.pyc
